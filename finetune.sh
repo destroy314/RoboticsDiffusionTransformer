@@ -6,10 +6,10 @@ export NCCL_NVLS_ENABLE=0
 
 export TEXT_ENCODER_NAME="google/t5-v1_1-xxl"
 export VISION_ENCODER_NAME="google/siglip-so400m-patch14-384"
-export OUTPUT_DIR="./checkpoints/rdt-finetune-1b"
+export OUTPUT_DIR="./checkpoints/rdt-finetune-1b-transfer-block"
 export CFLAGS="-I/usr/include"
 export LDFLAGS="-L/usr/lib/x86_64-linux-gnu"
-export CUTLASS_PATH="/path/to/cutlass"
+export CUTLASS_PATH="../cutlass"
 
 export WANDB_PROJECT="robotics_diffusion_transformer"
 
@@ -25,15 +25,18 @@ fi
 #     --deepspeed="./configs/zero2.json" \
 #     ...
 
-deepspeed --hostfile=hostfile.txt main.py \
+# deepspeed --hostfile=hostfile.txt main.py \
+#     --deepspeed="./configs/zero2.json" \
+accelerate launch main.py \
     --deepspeed="./configs/zero2.json" \
-    --pretrained_model_name_or_path="robotics-diffusion-transformer/rdt-1b" \
+    --pretrained_model_name_or_path="checkpoints/rdt-1b" \
+    --precomp_lang_embed \
     --pretrained_text_encoder_name_or_path=$TEXT_ENCODER_NAME \
     --pretrained_vision_encoder_name_or_path=$VISION_ENCODER_NAME \
     --output_dir=$OUTPUT_DIR \
-    --train_batch_size=32 \
-    --sample_batch_size=64 \
-    --max_train_steps=200000 \
+    --train_batch_size=4 \
+    --sample_batch_size=8 \
+    --max_train_steps=20000 \
     --checkpointing_period=1000 \
     --sample_period=500 \
     --checkpoints_total_limit=40 \
