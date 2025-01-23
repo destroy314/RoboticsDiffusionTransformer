@@ -250,6 +250,7 @@ def train(args, logger):
         state_noise_snr=args.state_noise_snr,
         use_hdf5=args.load_from_hdf5,
         use_precomp_lang_embed=args.precomp_lang_embed,
+        sub_sample=0.9,
     )
     sample_dataset = VLAConsumerDataset(
         config=config["dataset"],
@@ -264,7 +265,8 @@ def train(args, logger):
         state_noise_snr=None,
         use_hdf5=args.load_from_hdf5,
         use_precomp_lang_embed=args.precomp_lang_embed,
-    )                              
+        sub_sample=0.1,
+    )
     
     data_collator = DataCollatorForVLAConsumerDataset(tokenizer)                                                        
     

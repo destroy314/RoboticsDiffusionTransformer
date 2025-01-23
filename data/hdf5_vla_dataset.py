@@ -9,16 +9,38 @@ import numpy as np
 
 from configs.state_vec import STATE_VEC_IDX_MAPPING
 
+# Target indices corresponding to your state space
+# In this example: 6 joints + 1 gripper for each arm
+UNI_STATE_INDICES = {
+    False:
+        [
+            STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
+        ] + [
+            STATE_VEC_IDX_MAPPING["left_gripper_open"]
+        ] + [
+            STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(6)
+        ] + [
+            STATE_VEC_IDX_MAPPING["right_gripper_open"]
+        ],
+    True:
+        [
+            STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(6)
+        ] + [
+            STATE_VEC_IDX_MAPPING["right_gripper_open"]
+        ]
+}
+
 
 class HDF5VLADataset:
     """
     This class is used to sample episodes from the embododiment dataset
     stored in HDF5.
     """
-    def __init__(self) -> None:
+    def __init__(self, sub_sample=1.0) -> None:
         # [Modify] The path to the HDF5 dataset directory
         # Each HDF5 file contains one episode
-        HDF5_DIR = "data/datasets/airbot/transfer_block"
+        HDF5_DIR = "data/datasets/airbot"
+        self.right_arm_keywords = ["pick_place"] # treat episode which has with keyword in file path as single right arm data
         self.DATASET_NAME = "airbot"
         
         self.file_paths = []
@@ -26,7 +48,21 @@ class HDF5VLADataset:
             for filename in fnmatch.filter(files, '*.hdf5'):
                 file_path = os.path.join(root, filename)
                 self.file_paths.append(file_path)
-                
+        
+        indices = np.arange(len(self))
+        np.random.seed(42)
+        np.random.shuffle(indices)
+
+        superior = sub_sample > 0.5
+        if superior:
+            sub_sample = 1 - sub_sample
+        split = int(len(indices) * sub_sample)
+        if superior:
+            indices = indices[split:]
+        else:
+            indices = indices[:split]
+        self.file_paths = [self.file_paths[i] for i in indices]
+        
         # Load the config
         with open('configs/base.yaml', 'r') as file:
             config = yaml.safe_load(file)
@@ -132,7 +168,7 @@ class HDF5VLADataset:
             # We randomly sample a timestep
             step_id = np.random.randint(first_idx-1, num_steps)
             
-            # Load the instruction
+            # Load the instruction file path
             dir_path = os.path.dirname(file_path)
             # with open(os.path.join(dir_path, 'expanded_instruction_gpt-4-turbo.json'), 'r') as f_instr:
             #     instruction_dict = json.load(f_instr)
@@ -172,22 +208,17 @@ class HDF5VLADataset:
                     actions,
                     np.tile(actions[-1:], (self.CHUNK_SIZE-actions.shape[0], 1))
                 ], axis=0)
+
+            right_only = False
+            for keyword in self.right_arm_keywords:
+                if keyword in file_path:
+                    right_only = True
+                    break
             
             # Fill the state/action into the unified vector
             def fill_in_state(values):
-                # Target indices corresponding to your state space
-                # In this example: 6 joints + 1 gripper for each arm
-                UNI_STATE_INDICES = [
-                    STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
-                ] + [
-                    STATE_VEC_IDX_MAPPING["left_gripper_open"]
-                ] + [
-                    STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(6)
-                ] + [
-                    STATE_VEC_IDX_MAPPING["right_gripper_open"]
-                ]
                 uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
-                uni_vec[..., UNI_STATE_INDICES] = values
+                uni_vec[..., UNI_STATE_INDICES[right_only]] = values
                 return uni_vec
             state = fill_in_state(state)
             state_indicator = fill_in_state(np.ones_like(state_std))
@@ -203,8 +234,10 @@ class HDF5VLADataset:
                 imgs = []
                 for i in range(max(step_id-self.IMG_HISORY_SIZE+1, 0), step_id+1):
                     img = f['observations']['images'][key][i]
-                    imgs.append(img)
-                    # imgs.append(cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR))
+                    if imgs.shape == (480, 640, 3):
+                        imgs.append(img)
+                    else:
+                        imgs.append(cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR))
                 imgs = np.stack(imgs)
                 if imgs.shape[0] < self.IMG_HISORY_SIZE:
                     # Pad the images using the first image
@@ -222,7 +255,7 @@ class HDF5VLADataset:
             )
             cam_left_wrist = parse_img('cam_left_wrist')
             cam_left_wrist_mask = cam_high_mask.copy()
-            cam_right_wrist = parse_img('cam_right_wrist')
+            cam_right_wrist = parse_img('cam_right_wrist') if not right_only else np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0))
             cam_right_wrist_mask = cam_high_mask.copy()
             
             # Return the resulting sample
@@ -282,22 +315,17 @@ class HDF5VLADataset:
             # Parse the state and action
             state = qpos[first_idx-1:]
             action = target_qpos[first_idx-1:]
+
+            right_only = False
+            for keyword in self.right_arm_keywords:
+                if keyword in file_path:
+                    right_only = True
+                    break
             
             # Fill the state/action into the unified vector
             def fill_in_state(values):
-                # Target indices corresponding to your state space
-                # In this example: 6 joints + 1 gripper for each arm
-                UNI_STATE_INDICES = [
-                    STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
-                ] + [
-                    STATE_VEC_IDX_MAPPING["left_gripper_open"]
-                ] + [
-                    STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(6)
-                ] + [
-                    STATE_VEC_IDX_MAPPING["right_gripper_open"]
-                ]
                 uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
-                uni_vec[..., UNI_STATE_INDICES] = values
+                uni_vec[..., UNI_STATE_INDICES[right_only]] = values
                 return uni_vec
             state = fill_in_state(state)
             action = fill_in_state(action)

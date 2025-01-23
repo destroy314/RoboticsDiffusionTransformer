@@ -39,26 +39,12 @@ preload_images = None
 # ROS operator class
 class RosOperator:
     def __init__(self, args):
-        # self.robot_base_deque = None
-        # self.puppet_arm_right_deque = None
-        # self.puppet_arm_left_deque = None
-        # self.img_front_deque = None
-        # self.img_right_deque = None
-        # self.img_left_deque = None
-        # self.img_front_depth_deque = None
-        # self.img_right_depth_deque = None
-        # self.img_left_depth_deque = None
-        # self.bridge = None
-        # self.puppet_arm_left_publisher = None
-        # self.puppet_arm_right_publisher = None
-        # self.robot_base_publisher = None
-        # self.puppet_arm_publish_thread = None
-        # self.puppet_arm_publish_lock = None
         self.args = args
         self.init()
         self.init_ros()
 
     def init(self):
+        self.right = self.args.right
         self.bridge = CvBridge()
         self.img_left_deque = deque()
         self.img_right_deque = deque()
@@ -84,19 +70,15 @@ class RosOperator:
         rospy.Subscriber(self.args.puppet_arm_left_topic, JointState, self.puppet_arm_left_callback, queue_size=1000, tcp_nodelay=True)
         rospy.Subscriber(self.args.puppet_arm_right_topic, JointState, self.puppet_arm_right_callback, queue_size=1000, tcp_nodelay=True)
         rospy.Subscriber(self.args.robot_base_topic, Odometry, self.robot_base_callback, queue_size=1000, tcp_nodelay=True)
-        self.puppet_arm_left_publisher = rospy.Publisher(self.args.puppet_arm_left_cmd_topic, JointState, queue_size=10)
-        self.puppet_arm_right_publisher = rospy.Publisher(self.args.puppet_arm_right_cmd_topic, JointState, queue_size=10)
+        self.puppet_arm_publisher = rospy.Publisher(self.args.puppet_arm_cmd_topic, JointState, queue_size=100)
         self.robot_base_publisher = rospy.Publisher(self.args.robot_base_cmd_topic, Twist, queue_size=10)
 
     def puppet_arm_publish(self, left, right):
         joint_state_msg = JointState()
         joint_state_msg.header = Header()
         joint_state_msg.header.stamp = rospy.Time.now()  # Set timestep
-        joint_state_msg.name = ['joint0', 'joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6']  # 设置关节名称
-        joint_state_msg.position = left
-        self.puppet_arm_left_publisher.publish(joint_state_msg)
-        joint_state_msg.position = right
-        self.puppet_arm_right_publisher.publish(joint_state_msg)
+        joint_state_msg.position = np.concatenate((left, right))
+        self.puppet_arm_publisher.publish(joint_state_msg)
 
     def robot_base_publish(self, vel):
         vel_msg = Twist()
@@ -114,6 +96,8 @@ class RosOperator:
         left_arm = None
         right_arm = None
         while True and not rospy.is_shutdown():
+            if self.right:
+                left_arm = left
             if len(self.puppet_arm_left_deque) != 0:
                 left_arm = list(self.puppet_arm_left_deque[-1].position)
             if len(self.puppet_arm_right_deque) != 0:
@@ -148,17 +132,15 @@ class RosOperator:
             joint_state_msg = JointState()
             joint_state_msg.header = Header()
             joint_state_msg.header.stamp = rospy.Time.now()  # Set the timestep
-            joint_state_msg.name = ['joint0', 'joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6']  # 设置关节名称
-            joint_state_msg.position = left_arm
-            self.puppet_arm_left_publisher.publish(joint_state_msg)
-            joint_state_msg.position = right_arm
-            self.puppet_arm_right_publisher.publish(joint_state_msg)
+            joint_state_msg.position = left_arm + right_arm
+            self.puppet_arm_publisher.publish(joint_state_msg)
             step += 1
             print("puppet_arm_publish_continuous:", step, left_arm, right_arm)
             rate.sleep()
 
     def puppet_arm_publish_linear(self, left, right):
         "通过线性插值将机械臂从当前位置平滑移动到目标位置"
+        raise NotImplementedError
         num_step = 100
         rate = rospy.Rate(200)
 
@@ -340,6 +322,7 @@ def make_policy(args):
         # pretrained_text_encoder_name_or_path=pretrained_text_encoder_name_or_path,
         pretrained_vision_encoder_name_or_path=pretrained_vision_encoder_name_or_path,
         control_frequency=args.ctrl_freq,
+        right=args.right,
     )
 
     return model
@@ -515,16 +498,22 @@ def model_inference(args, config, ros_operator: RosOperator):
 
     # Initialize position of the puppet arm
     # for airbot play
-    left1 = [-0.05664911866188049,-0.26874953508377075,0.5613412857055664,1.483367681503296,-1.1999313831329346,-1.3498512506484985,0]
-    right1 = [-0.05664911866188049,-0.26874953508377075,0.5613412857055664,-1.483367681503296,1.1999313831329346,1.3498512506484985,0]
-    # ros_operator.puppet_arm_publish_continuous(left0, right0)
-    ros_operator.puppet_arm_publish_continuous(left1, right1)
+    left = [-0.05664911866188049,-0.26874953508377075,0.5613412857055664,1.483367681503296,-1.1999313831329346,-1.3498512506484985,0]
+    right = [-0.05664911866188049,-0.26874953508377075,0.5613412857055664,-1.483367681503296,1.1999313831329346,1.3498512506484985,0]
+    ros_operator.puppet_arm_publish_continuous(left, right)
     input("Press enter to continue")
-    # ros_operator.puppet_arm_publish_continuous(left1, right1)
     # Initialize the previous action to be the initial robot state
     pre_action = np.zeros(config['state_dim'])
-    pre_action[:14] = np.array(left1 + right1)
+    pre_action[:14] = np.array(left + right)
     action = None
+    paused = False
+    from pynput import keyboard
+    def on_press(key):
+        nonlocal paused
+        if key.char == 'p':
+            paused = not paused
+    listener = keyboard.Listener(on_press=on_press)
+    listener.start()
     # Inference loop
     with torch.inference_mode():
         while True and not rospy.is_shutdown():
@@ -542,6 +531,7 @@ def model_inference(args, config, ros_operator: RosOperator):
                 if t % chunk_size == 0:
                     # Start inference
                     action_buffer = inference_fn(args, config, policy, t).copy()
+                    paused = False
                 
                 raw_action = action_buffer[t % chunk_size]
                 action = raw_action
@@ -553,6 +543,11 @@ def model_inference(args, config, ros_operator: RosOperator):
                     interp_actions = action[np.newaxis, :]
                 # Execute the interpolated actions one by one
                 for act in interp_actions:
+                    if paused:
+                        print("Paused")
+                        t += (chunk_size - t % chunk_size - 1)
+                        time.sleep(1)
+                        break
                     left_action = act[:7]
                     right_action = act[7:14]
                     
@@ -591,10 +586,8 @@ def get_arguments():
     parser.add_argument('--img_right_depth_topic', action='store', type=str, help='img_right_depth_topic',
                         default='/camera_r/depth/image_raw', required=False)
     
-    parser.add_argument('--puppet_arm_left_cmd_topic', action='store', type=str, help='puppet_arm_left_cmd_topic',
-                        default='/master/joint_left', required=False)
-    parser.add_argument('--puppet_arm_right_cmd_topic', action='store', type=str, help='puppet_arm_right_cmd_topic',
-                        default='/master/joint_right', required=False)
+    parser.add_argument('--puppet_arm_cmd_topic', action='store', type=str, help='puppet_arm_right_cmd_topic',
+                        default='/master/joint', required=False)
     parser.add_argument('--puppet_arm_left_topic', action='store', type=str, help='puppet_arm_left_topic',
                         default='/puppet/joint_left', required=False)
     parser.add_argument('--puppet_arm_right_topic', action='store', type=str, help='puppet_arm_right_topic',
@@ -639,6 +632,8 @@ def get_arguments():
     
     parser.add_argument('--lang_embeddings_path', type=str, required=True, 
                         help='Path to the pre-encoded language instruction embeddings')
+    
+    parser.add_argument('--right', type=bool, required=False, default=False, help='Whether to only use the right arm')
     
     args = parser.parse_args()
     return args
