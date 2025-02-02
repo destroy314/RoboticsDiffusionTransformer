@@ -253,9 +253,9 @@ class HDF5VLADataset:
             cam_high_mask = np.array(
                 [False] * (self.IMG_HISORY_SIZE - valid_len) + [True] * valid_len
             )
-            cam_left_wrist = parse_img('cam_left_wrist')
+            cam_left_wrist = parse_img('cam_left_wrist') if not right_only else np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0))
             cam_left_wrist_mask = cam_high_mask.copy()
-            cam_right_wrist = parse_img('cam_right_wrist') if not right_only else np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0))
+            cam_right_wrist = parse_img('cam_right_wrist')
             cam_right_wrist_mask = cam_high_mask.copy()
             
             # Return the resulting sample

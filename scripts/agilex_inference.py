@@ -507,11 +507,19 @@ def model_inference(args, config, ros_operator: RosOperator):
     pre_action[:14] = np.array(left + right)
     action = None
     paused = False
+    reset = False
     from pynput import keyboard
     def on_press(key):
         nonlocal paused
-        if key.char == 'p':
-            paused = not paused
+        nonlocal reset
+        try:
+            print(f"Key {key.char} pressed")
+            if key.char == 'p':
+                paused = not paused
+            elif key.char == 'r':
+                reset = True
+        except:
+            pass
     listener = keyboard.Listener(on_press=on_press)
     listener.start()
     # Inference loop
@@ -563,6 +571,14 @@ def model_inference(args, config, ros_operator: RosOperator):
                 
                 print("Published Step", t)
                 pre_action = action.copy()
+
+                if reset:
+                    reset = False
+                    ros_operator.puppet_arm_publish_continuous(left, right)
+                    pre_action = np.zeros(config['state_dim'])
+                    pre_action[:14] = np.array(left + right)
+                    input("Press enter to continue")
+                    break
 
 
 def get_arguments():
@@ -633,7 +649,7 @@ def get_arguments():
     parser.add_argument('--lang_embeddings_path', type=str, required=True, 
                         help='Path to the pre-encoded language instruction embeddings')
     
-    parser.add_argument('--right', type=bool, required=False, default=False, help='Whether to only use the right arm')
+    parser.add_argument('--right', action='store_true', required=False, default=False, help='Whether to only use the right arm')
     
     args = parser.parse_args()
     return args
