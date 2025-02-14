@@ -234,10 +234,10 @@ class HDF5VLADataset:
                 imgs = []
                 for i in range(max(step_id-self.IMG_HISORY_SIZE+1, 0), step_id+1):
                     img = f['observations']['images'][key][i]
-                    if imgs.shape == (480, 640, 3):
+                    if img.shape == (480, 640, 3):
                         imgs.append(img)
                     else:
-                        imgs.append(cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR))
+                        imgs.append(cv2.cvtColor(cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB))
                 imgs = np.stack(imgs)
                 if imgs.shape[0] < self.IMG_HISORY_SIZE:
                     # Pad the images using the first image
